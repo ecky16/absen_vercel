@@ -19,17 +19,33 @@ export default async function handler(req, res) {
     if (args.length > 1) {
       const tokenUser = args[1];
       const url = `${scriptURL}?action=absen&nama=${encodeURIComponent(name)}&id=${id}&token=${tokenUser}`;
-      const result = await fetch(url);
-      const responseText = await result.text();
+      try {
+        const result = await fetch(url);
+        const responseText = await result.text();
 
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: responseText
-        })
-      });
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: responseText,
+            parse_mode: "Markdown"
+          })
+        });
+
+        return res.status(200).send('OK');
+      } catch (err) {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: "❌ Gagal melakukan absen. Silakan coba lagi nanti."
+          })
+        });
+
+        return res.status(500).send(err.message || 'Error saat kontak GAS');
+      }
     } else {
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
@@ -39,8 +55,10 @@ export default async function handler(req, res) {
           text: "⚠️ QR tidak valid. Harap scan dari layar."
         })
       });
+
+      return res.status(200).send('No token');
     }
   }
 
-  return res.status(200).send('OK');
+  return res.status(200).send("OK");
 }
