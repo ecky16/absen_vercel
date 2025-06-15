@@ -19,29 +19,38 @@ export default async function handler(req, res) {
     return res.status(200).send("OK");
   }
 
-  const tokenArea = args[1]; // contoh: abc123_PBL
+  const tokenArea = args[1]; // format: abc123_PBL
   const [token, area] = tokenArea.split("_");
+  if (!token || !area) {
+    await sendTelegram(chat_id, "❌ Format token tidak valid. Silakan scan ulang.");
+    return res.status(200).send("OK");
+  }
+
   const scriptURL = "https://script.google.com/macros/s/AKfycbzjYLOPjkm8GvbxCgLFbysK16n1nh6YRTgmKFn7oQTGfNSS9t85JkXwfoAXEHkHbEvVXg/exec";
-  const url = `${scriptURL}?action=absen&token=${tokenArea}&id=${telegram_id}&nama=${encodeURIComponent(full_name)}`;
+  const url = `${scriptURL}?action=absen&token=${token}_${area}&id=${telegram_id}&nama=${encodeURIComponent(full_name)}`;
 
-  const resScript = await fetch(url);
-  const statusAbsen = await resScript.text();
+  try {
+    const resScript = await fetch(url);
+    const statusAbsen = await resScript.text();
 
-  if (statusAbsen.includes("✅ Absen berhasil")) {
-    const now = new Date();
-const waktu = now.toLocaleTimeString("id-ID", {
-  timeZone: "Asia/Jakarta",
-  hour12: false
-});
+    if (statusAbsen.includes("✅ Absen berhasil")) {
+      const now = new Date();
+      const waktu = now.toLocaleTimeString("id-ID", {
+        timeZone: "Asia/Jakarta",
+        hour12: false
+      });
 
+      const pesan = `✅ Absen berhasil! Terima kasih, *${full_name}*.\n` +
+                    `🕒 Absen pukul *${waktu} WIB*\n` +
+                    `🏢 Lokasi Service Area *"${area}"*`;
 
-    const pesan = `✅ Absen berhasil! Terima kasih, *${full_name}*.\n` +
-                  `🕒 Absen pukul *${waktu} WIB*\n` +
-                  `🏢 Lokasi Service Area *"${area}"*`;
-
-    await sendTelegram(chat_id, pesan, "Markdown");
-  } else {
-    await sendTelegram(chat_id, statusAbsen);
+      await sendTelegram(chat_id, pesan, "Markdown");
+    } else {
+      await sendTelegram(chat_id, statusAbsen);
+    }
+  } catch (error) {
+    await sendTelegram(chat_id, "❌ Gagal menghubungkan ke server. Silakan coba lagi.");
+    console.error("GAGAL fetch Apps Script:", error);
   }
 
   return res.status(200).send("OK");
