@@ -19,23 +19,36 @@ export default async function handler(req, res) {
     return res.status(200).send("OK");
   }
 
-  const tokenArea = args[1]; // format: abc123_PBL
+  const tokenArea = args[1]; // contoh: abc123_PBL
+  const [token, area] = tokenArea.split("_");
   const scriptURL = "https://script.google.com/macros/s/AKfycbzjYLOPjkm8GvbxCgLFbysK16n1nh6YRTgmKFn7oQTGfNSS9t85JkXwfoAXEHkHbEvVXg/exec";
   const url = `${scriptURL}?action=absen&token=${tokenArea}&id=${telegram_id}&nama=${encodeURIComponent(full_name)}`;
 
   const resScript = await fetch(url);
-  const textResult = await resScript.text();
+  const statusAbsen = await resScript.text();
 
-  await sendTelegram(chat_id, textResult);
+  if (statusAbsen.includes("✅ Absen berhasil")) {
+    const now = new Date();
+    const waktu = now.toLocaleTimeString("id-ID", { hour12: false });
+
+    const pesan = `✅ Absen berhasil! Terima kasih, *${full_name}*.\n` +
+                  `🕒 Absen pukul *${waktu} WIB*\n` +
+                  `🏢 Lokasi Service Area *"${area}"*`;
+
+    await sendTelegram(chat_id, pesan, "Markdown");
+  } else {
+    await sendTelegram(chat_id, statusAbsen);
+  }
+
   return res.status(200).send("OK");
 }
 
-async function sendTelegram(chat_id, text) {
+async function sendTelegram(chat_id, text, parse_mode = null) {
   const telegramToken = process.env.BOT_TOKEN;
   const telegramURL = `https://api.telegram.org/bot${telegramToken}/sendMessage`;
   await fetch(telegramURL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id, text })
+    body: JSON.stringify({ chat_id, text, parse_mode })
   });
 }
