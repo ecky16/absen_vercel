@@ -29,7 +29,11 @@ export default async function handler(req, res) {
 
   if (statusAbsen.includes("✅ Absen berhasil")) {
     const now = new Date();
-    const waktu = now.toLocaleTimeString("id-ID", { hour12: false });
+const waktu = now.toLocaleTimeString("id-ID", {
+  timeZone: "Asia/Jakarta",
+  hour12: false
+});
+
 
     const pesan = `✅ Absen berhasil! Terima kasih, *${full_name}*.\n` +
                   `🕒 Absen pukul *${waktu} WIB*\n` +
