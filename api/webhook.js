@@ -1,4 +1,3 @@
-// webhook.js
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
@@ -15,12 +14,13 @@ export default async function handler(req, res) {
 
   const args = text.split(" ");
   if (args.length < 2) {
-    await sendTelegram(chat_id, "⚠️ Token tidak ditemukan. Silakan scan QR terbaru.");
+    await sendTelegram(chat_id, "📸 Silakan scan QR terlebih dahulu untuk absen.");
     return res.status(200).send("OK");
   }
 
-  const tokenArea = args[1]; // format: abc123_PBL
+  const tokenArea = args[1]; // contoh: abc123_PBL
   const [token, area] = tokenArea.split("_");
+
   if (!token || !area) {
     await sendTelegram(chat_id, "❌ Format token tidak valid. Silakan scan ulang.");
     return res.status(200).send("OK");
@@ -45,6 +45,8 @@ export default async function handler(req, res) {
                     `🏢 Lokasi Service Area *"${area}"*`;
 
       await sendTelegram(chat_id, pesan, "Markdown");
+    } else if (statusAbsen.includes("❌ Token tidak valid") || statusAbsen.includes("❌ Token tidak cocok")) {
+      await sendTelegram(chat_id, "❌ Token tidak cocok atau area salah. Gunakan QR terbaru.");
     } else {
       await sendTelegram(chat_id, statusAbsen);
     }
