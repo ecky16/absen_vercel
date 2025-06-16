@@ -65,9 +65,19 @@ const tokenArea = args[1];
 async function sendTelegram(chat_id, text, parse_mode = null) {
   const telegramToken = process.env.BOT_TOKEN;
   const telegramURL = `https://api.telegram.org/bot${telegramToken}/sendMessage`;
+
+  const payload = {
+    chat_id,
+    text,
+  };
+
+  if (parse_mode) {
+    payload.parse_mode = parse_mode;
+  }
+
   await fetch(telegramURL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id, text, parse_mode })
+    body: JSON.stringify(payload),
   });
 }
