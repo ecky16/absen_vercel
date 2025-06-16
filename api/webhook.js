@@ -3,8 +3,6 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
   const body = req.body;
-  console.log("📥 ISI REQUEST BODY:", JSON.stringify(body, null, 2));
-
   const message = body?.message;
   const text = message?.text;
   const chat_id = message?.chat?.id;
