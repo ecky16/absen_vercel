@@ -17,13 +17,14 @@ export default async function handler(req, res) {
   const full_name = from.first_name + (from.last_name ? " " + from.last_name : "");
   const telegram_id = from.id;
 
-  const args = text.split(" ");
-  const tokenArea = args[1]; // contoh: abc123_PBL
+const args = text.trim().split(" ");
 
-  if (!tokenArea) {
-    await sendTelegram(chat_id, "📸 Silakan scan QR terlebih dahulu untuk absen.");
-    return res.status(200).send("OK");
-  }
+if (args.length < 2 || !args[1]) {
+  await sendTelegram(chat_id, "📸 Silakan scan QR terlebih dahulu untuk absen.");
+  return res.status(200).send("OK");
+}
+
+const tokenArea = args[1];
 
   const [token, area] = tokenArea.split("_");
   if (!token || !area) {
