@@ -1,3 +1,4 @@
+// webhook.js
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
@@ -7,20 +8,22 @@ export default async function handler(req, res) {
   const chat_id = message?.chat?.id;
   const from = message?.from;
 
-  if (!text || !text.startsWith("/start")) return res.status(200).send("OK");
+  if (!text || !text.startsWith("/start")) {
+    return res.status(200).send("OK");
+  }
 
   const full_name = from.first_name + (from.last_name ? " " + from.last_name : "");
   const telegram_id = from.id;
 
   const args = text.split(" ");
-  if (args.length < 2) {
+  const tokenArea = args[1]; // contoh: abc123_PBL
+
+  if (!tokenArea) {
     await sendTelegram(chat_id, "📸 Silakan scan QR terlebih dahulu untuk absen.");
     return res.status(200).send("OK");
   }
 
-  const tokenArea = args[1]; // contoh: abc123_PBL
   const [token, area] = tokenArea.split("_");
-
   if (!token || !area) {
     await sendTelegram(chat_id, "❌ Format token tidak valid. Silakan scan ulang.");
     return res.status(200).send("OK");
@@ -40,13 +43,11 @@ export default async function handler(req, res) {
         hour12: false
       });
 
-      const pesan = `✅ Absen berhasil! Terima kasih, *${full_name}*.\n` +
-                    `🕒 Absen pukul *${waktu} WIB*\n` +
-                    `🏢 Lokasi Service Area *"${area}"*`;
+      const pesan = `✅ Absen berhasil! Terima kasih, *${full_name}*.` +
+                    `\n🕒 Absen pukul *${waktu} WIB*` +
+                    `\n🏢 Lokasi Service Area *\"${area}\"*`;
 
       await sendTelegram(chat_id, pesan, "Markdown");
-    } else if (statusAbsen.includes("❌ Token tidak valid") || statusAbsen.includes("❌ Token tidak cocok")) {
-      await sendTelegram(chat_id, "❌ Token tidak cocok atau area salah. Gunakan QR terbaru.");
     } else {
       await sendTelegram(chat_id, statusAbsen);
     }
