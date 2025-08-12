@@ -1,87 +1,88 @@
 export default async function handler(req, res) {
-  // Healthcheck untuk ping
-  if (req.method === "GET") return res.status(200).send("OK-NODE1");
+  if (req.method === "GET") return res.status(200).send("OK-NODE2");
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  // ACK cepat biar Telegram nggak timeout
+  // ACK cepat ke Telegram
   res.status(200).send("OK");
 
   try {
     const body = req.body || {};
-    const message = body?.message;
-    const text = message?.text;
-    const chat_id = message?.chat?.id;
-    const from = message?.from;
+    const msg = body.message;
+    const text = msg?.text || "";
+    const chatId = msg?.chat?.id;
+    const from = msg?.from;
 
-    if (!text || !text.startsWith("/start")) return;
+    if (!text.startsWith("/start") || !chatId || !from) return;
 
-    const full_name = from.first_name + (from.last_name ? " " + from.last_name : "");
-    const telegram_id = from.id;
+    // 1) Pesan awal (harus terkirim)
+    await sendTelegram(chatId, "⏳ Memproses absen…");
 
+    // Argumen /start
     const args = text.trim().split(" ");
-    if (args.length < 2 || !args[1]) {
-      await sendTelegram(chat_id, "📸 Silakan *scan QR* terlebih dahulu untuk absen.", "Markdown");
+    if (args.length < 2) {
+      await sendTelegram(chatId, "Silakan scan QR dulu untuk absen.");
       return;
     }
-
-    const tokenArea = args[1]; // contoh: abc123_PSN
+    const tokenArea = args[1];           // contoh: abcd1234_PSN
     const [token, area] = tokenArea.split("_");
     if (!token || !area) {
-      await sendTelegram(chat_id, "❌ Format token tidak valid. Silakan scan ulang.");
+      await sendTelegram(chatId, "Format token tidak valid. Silakan scan ulang.");
       return;
     }
 
-    // Feedback cepat biar terasa responsif
-    await sendTelegram(chat_id, "⏳ Memproses absen…");
-
+    const fullName = from.first_name + (from.last_name ? " " + from.last_name : "");
     const scriptURL = "https://script.google.com/macros/s/AKfycbzjYLOPjkm8GvbxCgLFbysK16n1nh6YRTgmKFn7oQTGfNSS9t85JkXwfoAXEHkHbEvVXg/exec";
-    const url = `${scriptURL}?action=absen&token=${token}_${area}&id=${telegram_id}&nama=${encodeURIComponent(full_name)}`;
+    const url = `${scriptURL}?action=absen&token=${token}_${area}&id=${from.id}&nama=${encodeURIComponent(fullName)}`;
 
-    // Timeout guard (6 detik)
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 6000);
-    let statusAbsen = "TIMEOUT";
+    // 2) Fallback timer: kalau 8 detik belum ada balasan akhir, kirimkan pesan gagal
+    let replied = false;
+    const fallback = setTimeout(async () => {
+      if (!replied) {
+        replied = true;
+        await sendTelegram(chatId, "⚠️ Server sedang lambat. Silakan coba lagi sebentar lagi.");
+      }
+    }, 8000);
+
+    // 3) Panggil GAS dengan timeout 6 detik
+    let statusText = "TIMEOUT";
     try {
-      const r = await fetch(url, { signal: ac.signal });
-      statusAbsen = await r.text();
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 6000);
+      const r = await fetch(url, { signal: ac.signal, cache: "no-store" });
+      statusText = await r.text();
+      clearTimeout(t);
     } catch (_) {}
-    clearTimeout(timer);
 
-    if (statusAbsen === "TIMEOUT") {
-      await sendTelegram(chat_id, "⚠️ Server sedang lambat. Coba lagi ya.");
-      return;
-    }
-
-    if (statusAbsen.includes("✅ Absen berhasil")) {
-      const waktu = new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
-      const pesan = `✅ Absen berhasil! Terima kasih, *${full_name}*.\n🕒 Absen pukul *${waktu} WIB*\n🏢 Lokasi Service Area *"${area}"*`;
-      await sendTelegram(chat_id, pesan, "Markdown");
-    } else {
-      await sendTelegram(chat_id, statusAbsen || "❌ Gagal menghubungkan ke server. Silakan coba lagi.");
+    if (!replied) {
+      if (statusText !== "TIMEOUT" && statusText.includes("✅ Absen berhasil")) {
+        const waktu = new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+        await sendTelegram(
+          chatId,
+          `✅ Absen berhasil! Terima kasih, ${fullName}.\n🕒 Absen pukul ${waktu} WIB\n🏢 Lokasi Service Area "${area}"`
+        );
+      } else if (statusText !== "TIMEOUT") {
+        await sendTelegram(chatId, statusText || "❌ Gagal menghubungkan ke server. Silakan coba lagi.");
+      } else {
+        await sendTelegram(chatId, "⚠️ Server sedang lambat. Silakan coba lagi sebentar lagi.");
+      }
+      replied = true;
+      clearTimeout(fallback);
     }
   } catch (e) {
     console.error("Webhook error:", e);
+    // sudah ACK; jangan throw
   }
 }
 
-async function sendTelegram(chat_id, text, parse_mode = null) {
+async function sendTelegram(chat_id, text) {
   const token = process.env.BOT_TOKEN;
+  if (!token) { console.error("ENV BOT_TOKEN tidak terbaca"); return; }
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-  // 🔎 Guard kalau token tidak terbaca (biar ketahuan)
-  if (!token) {
-    console.error("ENV BOT_TOKEN TIDAK TERBACA!");
-    return;
-  }
-
-  const payload = { chat_id, text };
-  if (parse_mode) payload.parse_mode = parse_mode;
-
   try {
     await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ chat_id, text })
     });
   } catch (e) {
     console.error("sendTelegram error:", e);
