@@ -76,15 +76,25 @@ export default async function handler(req, res) {
 
 async function sendTelegram(chat_id, text) {
   const token = process.env.BOT_TOKEN;
-  if (!token) { console.error("ENV BOT_TOKEN tidak terbaca"); return; }
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  if (!token) { 
+    console.error("ENV BOT_TOKEN tidak terbaca");
+    return;
+  }
+
+  const base = `https://api.telegram.org/bot${token}/sendMessage`;
+  const qs = new URLSearchParams({
+    chat_id: String(chat_id),
+    text: String(text)
+    // parse_mode: "Markdown" // aktifkan lagi nanti kalau sudah stabil
+  });
+
   try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id, text })
-    });
+    const r = await fetch(`${base}?${qs.toString()}`, { method: "GET", cache: "no-store" });
+    if (!r.ok) {
+      const t = await r.text().catch(() => "");
+      console.error("sendTelegram non-200:", r.status, t);
+    }
   } catch (e) {
-    console.error("sendTelegram error:", e);
+    console.error("sendTelegram fetch failed:", e);
   }
 }
