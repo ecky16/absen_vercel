@@ -1,9 +1,9 @@
-// api/webhook.js — SYNC + grace recheck
+// api/webhook.js — SYNC + single wait (≤ ~8.8s)
 export default async function handler(req, res) {
-  if (req.method === "GET") return res.status(200).send("OK-SYNC2");
+  if (req.method === "GET") return res.status(200).send("OK-SYNC3");
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  // ---- parse body aman (kadang body berupa string) ----
+  // --- parse body aman (kadang body berupa string) ---
   let body = req.body;
   try { if (!body || typeof body === "string") body = JSON.parse(body || "{}"); } catch { body = {}; }
 
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
       body.edited_message?.from ||
       body.callback_query?.from;
 
-    // Biar Telegram nggak retry, selalu balas 200 di akhir handler
+    // selalu balas 200 di akhir handler (biar Telegram tak retry)
     if (!chatId || !from || !text.startsWith("/start")) {
       return res.status(200).send("OK");
     }
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     }
 
     // Dukung 2 format payload: TOKEN_AREA atau AREA-TOKEN
-    const raw = args[1];
+    const raw = args[1].trim();
     let token = "", area = "";
     if (raw.includes("_")) {
       const [t, a] = raw.split("_");
@@ -57,11 +57,11 @@ export default async function handler(req, res) {
 
     const fullName = `${from.first_name || ""}${from.last_name ? " " + from.last_name : ""}`.trim();
 
-    // 1) kirim pesan awal (ambil message_id biar bisa di-edit)
+    // 1) kirim pesan awal (ambil message_id untuk di-edit)
     const startResp = await sendMessageGET(chatId, "⏳ Memproses absen...");
     const messageId = startResp?.result?.message_id;
 
-    // 2) panggil GAS — timeout utama 6s (biar total < 10s batas Telegram)
+    // 2) panggil GAS — single wait (<= 8800 ms) agar total < 10s
     const GAS =
       process.env.GAS_VALIDATE_URL ||
       process.env.APP_SCRIPT_URL ||
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
       token: `${token}_${area}`,
       id: String(from.id),
       nama: fullName,
-      // kirim juga alias param (supaya cocok dgn variasi GAS lama)
+      // alias param biar kompatibel dengan variasi GAS
       tg_id: String(from.id),
       tg_name: fullName,
       area: area,
@@ -80,27 +80,13 @@ export default async function handler(req, res) {
     });
 
     const URL_GAS = `${GAS}?${qs.toString()}`;
-    let statusText = await fetchTextWithTimeout(URL_GAS, 6000).catch(() => null);
+    const statusText = await fetchTextWithTimeout(URL_GAS, 8800).catch(() => null);
 
-    // 3) fallback + grace recheck 2 detik (untuk kasus GAS telat tapi berhasil)
     if (!statusText) {
-      // tampilkan fallback dulu
       await editOrSend(chatId, messageId, "⚠️ Server sedang lambat. Silakan coba lagi sebentar lagi.");
-
-      // kasih kesempatan GAS menyusul (2 detik)
-      const retry = await fetchTextWithTimeout(URL_GAS, 2000).catch(() => null);
-      if (retry && isSuccess(retry)) {
-        const waktu = new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
-        await editOrSend(
-          chatId,
-          messageId,
-          `✅ Absen berhasil! Terima kasih, ${fullName}.\n🕒 Absen pukul ${waktu} WIB\n🏢 Lokasi Service Area "${area}"`
-        );
-      }
       return res.status(200).send("OK");
     }
 
-    // 4) jika dapat jawaban dalam 6s
     if (isSuccess(statusText)) {
       const waktu = new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
       await editOrSend(
@@ -115,7 +101,7 @@ export default async function handler(req, res) {
     return res.status(200).send("OK");
   } catch (e) {
     console.error("Webhook fatal error:", e);
-    return res.status(200).send("OK"); // hindari retry bertubi-tubi
+    return res.status(200).send("OK");
   }
 }
 
@@ -130,7 +116,7 @@ function isSuccess(txt) {
   return /✅\s*Absen berhasil/i.test(String(txt));
 }
 
-// Kirim pesan via GET (lebih tahan)
+// Kirim pesan via GET (lebih tahan gangguan jaringan)
 async function sendMessageGET(chat_id, text, parse_mode) {
   const token = process.env.BOT_TOKEN;
   if (!token) { console.error("ENV BOT_TOKEN kosong"); return null; }
