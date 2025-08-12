@@ -1,0 +1,3 @@
+{
+  "functions": { "api/*": { "regions": ["sin1"] } }
+}
