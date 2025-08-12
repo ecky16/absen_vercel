@@ -1,23 +1,36 @@
-// api/webhook.js — versi sinkron: BALAS TELEGRAM dulu, baru kirim 200 OK
+// api/webhook.js — SYNC + grace recheck
 export default async function handler(req, res) {
-  if (req.method === "GET") return res.status(200).send("OK-SYNC");
+  if (req.method === "GET") return res.status(200).send("OK-SYNC2");
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  // Parse body aman
+  // ---- parse body aman (kadang body berupa string) ----
   let body = req.body;
   try { if (!body || typeof body === "string") body = JSON.parse(body || "{}"); } catch { body = {}; }
 
   try {
-    const msg   = body.message || body.edited_message || body.callback_query?.message;
-    const text  = body.message?.text || body.edited_message?.text || body.callback_query?.data || "";
-    const chatId = msg?.chat?.id;
-    const from   = body.message?.from || body.edited_message?.from || body.callback_query?.from;
+    const msg =
+      body.message ||
+      body.edited_message ||
+      body.callback_query?.message;
 
+    const text =
+      body.message?.text ||
+      body.edited_message?.text ||
+      body.callback_query?.data ||
+      "";
+
+    const chatId = msg?.chat?.id;
+    const from =
+      body.message?.from ||
+      body.edited_message?.from ||
+      body.callback_query?.from;
+
+    // Biar Telegram nggak retry, selalu balas 200 di akhir handler
     if (!chatId || !from || !text.startsWith("/start")) {
-      return res.status(200).send("OK"); // biar Telegram gak retry
+      return res.status(200).send("OK");
     }
 
-    // Ambil argumen /start
+    // --- ambil argumen /start ---
     const args = text.trim().split(/\s+/);
     if (args.length < 2) {
       await sendMessageGET(chatId, "📸 Silakan scan QR terlebih dahulu untuk absen.");
@@ -29,11 +42,14 @@ export default async function handler(req, res) {
     let token = "", area = "";
     if (raw.includes("_")) {
       const [t, a] = raw.split("_");
-      token = t || ""; area = a || "";
+      token = (t || "").trim();
+      area  = (a || "").trim();
     } else if (raw.includes("-")) {
       const [a, t] = raw.split("-");
-      token = t || ""; area = a || "";
+      token = (t || "").trim();
+      area  = (a || "").trim();
     }
+
     if (!token || !area) {
       await sendMessageGET(chatId, "❌ Format token tidak valid. Silakan scan ulang.");
       return res.status(200).send("OK");
@@ -41,11 +57,11 @@ export default async function handler(req, res) {
 
     const fullName = `${from.first_name || ""}${from.last_name ? " " + from.last_name : ""}`.trim();
 
-    // 1) Kirim pesan awal dan ambil message_id (biar bisa di-edit)
-    const startResp = await sendMessageGET(chatId, "⏳ Memproses absen…");
+    // 1) kirim pesan awal (ambil message_id biar bisa di-edit)
+    const startResp = await sendMessageGET(chatId, "⏳ Memproses absen...");
     const messageId = startResp?.result?.message_id;
 
-    // 2) Call GAS dengan batas waktu KETAT supaya total < 10s
+    // 2) panggil GAS — timeout utama 6s (biar total < 10s batas Telegram)
     const GAS =
       process.env.GAS_VALIDATE_URL ||
       process.env.APP_SCRIPT_URL ||
@@ -55,40 +71,66 @@ export default async function handler(req, res) {
       action: "absen",
       token: `${token}_${area}`,
       id: String(from.id),
-      nama: fullName
+      nama: fullName,
+      // kirim juga alias param (supaya cocok dgn variasi GAS lama)
+      tg_id: String(from.id),
+      tg_name: fullName,
+      area: area,
+      token_area: `${token}_${area}`
     });
 
-    // Timeout 3000 ms saja agar aman dari batas 10s Telegram.
-    let statusText = await fetchTextWithTimeout(`${GAS}?${qs.toString()}`, 3000).catch(() => null);
+    const URL_GAS = `${GAS}?${qs.toString()}`;
+    let statusText = await fetchTextWithTimeout(URL_GAS, 6000).catch(() => null);
 
-    // 3) Edit pesan awal menjadi hasil akhir (atau fallback kalau GAS lambat)
+    // 3) fallback + grace recheck 2 detik (untuk kasus GAS telat tapi berhasil)
     if (!statusText) {
+      // tampilkan fallback dulu
       await editOrSend(chatId, messageId, "⚠️ Server sedang lambat. Silakan coba lagi sebentar lagi.");
+
+      // kasih kesempatan GAS menyusul (2 detik)
+      const retry = await fetchTextWithTimeout(URL_GAS, 2000).catch(() => null);
+      if (retry && isSuccess(retry)) {
+        const waktu = new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+        await editOrSend(
+          chatId,
+          messageId,
+          `✅ Absen berhasil! Terima kasih, ${fullName}.\n🕒 Absen pukul ${waktu} WIB\n🏢 Lokasi Service Area "${area}"`
+        );
+      }
       return res.status(200).send("OK");
     }
 
-    if (statusText.includes("✅ Absen berhasil")) {
+    // 4) jika dapat jawaban dalam 6s
+    if (isSuccess(statusText)) {
       const waktu = new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
       await editOrSend(
         chatId,
         messageId,
-        `✅ Absen berhasil! Terima kasih, *${fullName}*.\n🕒 Absen pukul *${waktu} WIB*\n🏢 Lokasi Service Area *"${area}"*`,
-        "Markdown"
+        `✅ Absen berhasil! Terima kasih, ${fullName}.\n🕒 Absen pukul ${waktu} WIB\n🏢 Lokasi Service Area "${area}"`
       );
     } else {
       await editOrSend(chatId, messageId, statusText);
     }
 
-    // 4) SELESAI → baru kirim 200 OK ke Telegram
     return res.status(200).send("OK");
   } catch (e) {
     console.error("Webhook fatal error:", e);
-    // Tetap balas OK agar Telegram tidak retry bertubi-tubi
-    return res.status(200).send("OK");
+    return res.status(200).send("OK"); // hindari retry bertubi-tubi
   }
 }
 
-// ===== Helpers (gunakan GET agar lebih tahan gangguan jaringan) =====
+/* ==================== helpers ==================== */
+
+function isSuccess(txt) {
+  // Bisa teks biasa "✅ Absen berhasil" atau JSON { ok:true, msg:"..." }
+  try {
+    const j = JSON.parse(txt);
+    if (j && (j.ok === true || /berhasil/i.test(String(j.msg || "")))) return true;
+  } catch (_) {}
+  return /✅\s*Absen berhasil/i.test(String(txt));
+}
+
+// Kirim pesan via GET (lebih tahan)
 async function sendMessageGET(chat_id, text, parse_mode) {
   const token = process.env.BOT_TOKEN;
   if (!token) { console.error("ENV BOT_TOKEN kosong"); return null; }
@@ -104,6 +146,15 @@ async function sendMessageGET(chat_id, text, parse_mode) {
     console.error("sendMessage GET failed:", e);
     return null;
   }
+}
+
+// Edit pesan awal; kalau gagal, kirim pesan baru
+async function editOrSend(chat_id, message_id, text, parse_mode) {
+  if (message_id) {
+    const ok = await editMessageGET(chat_id, message_id, text, parse_mode);
+    if (ok) return;
+  }
+  await sendMessageGET(chat_id, text, parse_mode);
 }
 
 async function editMessageGET(chat_id, message_id, text, parse_mode) {
@@ -126,14 +177,6 @@ async function editMessageGET(chat_id, message_id, text, parse_mode) {
     console.error("editMessage GET failed:", e);
     return false;
   }
-}
-
-async function editOrSend(chat_id, message_id, text, parse_mode) {
-  if (message_id) {
-    const ok = await editMessageGET(chat_id, message_id, text, parse_mode);
-    if (ok) return;
-  }
-  await sendMessageGET(chat_id, text, parse_mode);
 }
 
 async function fetchTextWithTimeout(url, ms) {
