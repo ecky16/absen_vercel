@@ -9,8 +9,7 @@ export default async function handler(req, res) {
   let body = req.body;
   try { if (!body || typeof body === "string") body = JSON.parse(body || "{}"); } catch { body = {}; }
 
-  // Ambil teks & chat id dari berbagai tipe update
-  const msg = body.message || body.edited_message || body.callback_query?.message;
+  const msg  = body.message || body.edited_message || body.callback_query?.message;
   const text = body.message?.text || body.edited_message?.text || body.callback_query?.data || "";
   const chatId = msg?.chat?.id;
 
@@ -24,7 +23,7 @@ async function sendGET(chat_id, text){
   const token = process.env.BOT_TOKEN;
   if (!token) { console.error("BOT_TOKEN kosong"); return; }
   const qs = new URLSearchParams({ chat_id: String(chat_id), text: String(text) });
-  const url = `https://api.telegram.org/bot${token}/sendMessage?${qs.toString()}`;
+  const url = `https://api.telegram.org/bot${token}/sendMessage?${qs}`;
   try {
     const r = await fetch(url, { method: "GET", cache: "no-store" });
     const j = await r.json().catch(()=>null);
